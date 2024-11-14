@@ -136,38 +136,22 @@ def page_rank(csr_matrix, n, iter=64, beta=0.85, eps=1e-8):
     return pr
 
 
-edge_list= [
-    (0, 5), (0, 8), (0, 3), (1, 7), (2, 8),
-    (3, 6), (4, 5), (4, 2), (5, 1), (5, 2),
-    (5, 7), (6, 0), (6, 3), (6, 7), (8, 7),
-    (8, 0), (8, 2), (8, 3), (9, 7), (9, 3)
-]
+def main():
+    G = process_file("web-Google.txt")
+    csr_matrix_large = graph_csr(G)
+    csr_transposed_large = csr_transpose(csr_matrix_large)
 
-csr_matrix = graph_csr(edge_list)
-csr_transposed = csr_transpose(csr_matrix)
+    pr_large = page_rank(csr_transposed_large, csr_transposed_large.n)
 
-pr = page_rank(csr_transposed, csr_transposed.n)
+    s_t = sorted(enumerate(pr_large), key=lambda x: x[1], reverse=True)
 
-print("페이지 랭크 결과:")
-for index, score in enumerate(pr):
-    node_id = csr_matrix.index_to_node[index]
-    print(f"노드 {node_id}: {score}")
+    value = [value for index, value in s_t]
+    index = [index for index, value in s_t]
+    ids = [csr_matrix_large.index_to_node[index] for index in index]
 
-print("=================================")
-g = process_file("web-Google.txt")
-csr_matrix_large = graph_csr(g)
-csr_transposed_large = csr_transpose(csr_matrix_large)
+    f = open("a.txt", "w")
+    for node_id, value in zip(ids, value):
+        f.write(f"{node_id}\t{value}\n")
 
-print(f"노드 수: {csr_matrix_large.n}, 엣지 수: {len(csr_matrix_large.value)}")
-print("=================================")
-pr_large = page_rank(csr_transposed_large, csr_transposed_large.n)
-
-s_t = sorted(enumerate(pr_large), key=lambda x: x[1], reverse=True)
-top_n = 10
-top_n_values = [value for index, value in s_t[:top_n]]
-top_n_indices = [index for index, value in s_t[:top_n]]
-top_n_node_ids = [csr_matrix_large.index_to_node[index] for index in top_n_indices]
-
-print("상위 노드들의 페이지 랭크 값:")
-for node_id, value in zip(top_n_node_ids, top_n_values):
-    print(f"노드 {node_id}: {value}")
+if __name__ == '__main__':
+    main()
