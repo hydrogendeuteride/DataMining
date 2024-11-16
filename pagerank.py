@@ -117,11 +117,12 @@ def csr_multiplication(csr_matrix, x):
     return y
 
 
-def page_rank(csr_matrix, n, iter=64, beta=0.85, eps=1e-9):
+def page_rank(csr_matrix, n, iter=64, beta=0.85, eps=1e-8):
     pr = [1 / n] * n
     new_pr = [0.0] * n
 
     for t in range(0, iter):
+        print(f"Iteration {t+1}")
         multiplied_pr = csr_multiplication(csr_matrix, pr)
 
         new_pr = [beta * x for x in multiplied_pr]
@@ -134,6 +135,7 @@ def page_rank(csr_matrix, n, iter=64, beta=0.85, eps=1e-9):
 
         pr = new_pr
 
+    print("converged at iteration {}".format(t+1))
     return pr
 
 
@@ -143,11 +145,6 @@ def main(args):
     csr_transposed_large = csr_transpose(csr_matrix_large)
 
     pr_large = page_rank(csr_transposed_large, csr_transposed_large.n, iter=args.niter)
-
-    # p = open("pagerank.txt", "w")
-    # for index, value in list(enumerate(pr_large)):
-    #     node_id = csr_matrix_large.index_to_node[index]
-    #     p.write(f"{node_id}\t{value}\n")
 
     s_t = sorted(enumerate(pr_large), key=lambda x: x[1], reverse=True)
 
