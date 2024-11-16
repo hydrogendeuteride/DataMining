@@ -63,9 +63,6 @@ def csr_transpose(csr_matrix):
     n = csr_matrix.n
     m = csr_matrix.m
 
-    if len(rowPtr) != n + 1:
-        raise ValueError("rowPtr length must be n + 1")
-
     nz = len(value)
 
     res_value = [0.0] * nz
