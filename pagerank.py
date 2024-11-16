@@ -157,7 +157,7 @@ def main(args):
 
     f = open(args.output, "w")
     for node_id, value in zip(ids, value):
-        f.write(f"{node_id}\t{value}\n")
+        f.write(f"{node_id}\t{value:.6f}\n")
 
 
 if __name__ == '__main__':
