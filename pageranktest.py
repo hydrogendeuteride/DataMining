@@ -1,4 +1,6 @@
 from collections import defaultdict
+
+import numpy as np
 from scipy.sparse import csr_matrix
 import networkx as nx
 
@@ -126,13 +128,33 @@ gg = nx.DiGraph()
 gg.add_edges_from(process_file("web-Google.txt"))
 pg = nx.pagerank(gg, alpha=0.9)
 
-
-top_5 = sorted(pg.items(), key=lambda x: x[1], reverse=True)[:5]
+top_5 = sorted(pg.items(), key=lambda x: x[1], reverse=True)[:10]
 
 print("PageRank 결과:")
-for node, rank in list(pg.items())[:5]:
+for node, rank in list(pg.items())[:10]:
     print(f"{node}: {rank}")
 
 print("PageRank 상위 5개 결과:")
 for node, rank in top_5:
     print(f"Node {node}: {rank}")
+
+print("\nGoogle 데이터셋의 PageRank 결과 (노드 ID 순서):")
+for node in list(sorted(pg.keys()))[:10]:
+    print(f"Node {node}: {pg[node]}")
+
+def read_pagerank_file(file_path):
+    # 파일에서 직접 구현한 PageRank 결과 읽기
+    pagerank_dict = {}
+    with open(file_path, "r") as f:
+        for line in f:
+            node, value = line.strip().split("\t")
+            pagerank_dict[int(node)] = float(value)
+    return pagerank_dict
+
+manual_pagerank = read_pagerank_file("pagerank.txt")
+
+manual_values = np.array([manual_pagerank[node] for node in manual_pagerank])
+networkx_values = np.array([pg[node] for node in sorted(pg.keys())])
+
+difference = np.linalg.norm(manual_values - networkx_values)
+print(f"벡터 차이 (L2 norm): {difference:.6e}")

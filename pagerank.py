@@ -1,4 +1,5 @@
 from collections import defaultdict
+import argparse
 
 
 class CSRMatrix:
@@ -116,7 +117,7 @@ def csr_multiplication(csr_matrix, x):
     return y
 
 
-def page_rank(csr_matrix, n, iter=64, beta=0.85, eps=1e-8):
+def page_rank(csr_matrix, n, iter=64, beta=0.85, eps=1e-9):
     pr = [1 / n] * n
     new_pr = [0.0] * n
 
@@ -136,12 +137,17 @@ def page_rank(csr_matrix, n, iter=64, beta=0.85, eps=1e-8):
     return pr
 
 
-def main():
-    G = process_file("web-Google.txt")
+def main(args):
+    G = process_file(args.input)
     csr_matrix_large = graph_csr(G)
     csr_transposed_large = csr_transpose(csr_matrix_large)
 
-    pr_large = page_rank(csr_transposed_large, csr_transposed_large.n)
+    pr_large = page_rank(csr_transposed_large, csr_transposed_large.n, iter=args.niter)
+
+    # p = open("pagerank.txt", "w")
+    # for index, value in list(enumerate(pr_large)):
+    #     node_id = csr_matrix_large.index_to_node[index]
+    #     p.write(f"{node_id}\t{value}\n")
 
     s_t = sorted(enumerate(pr_large), key=lambda x: x[1], reverse=True)
 
@@ -149,9 +155,16 @@ def main():
     index = [index for index, value in s_t]
     ids = [csr_matrix_large.index_to_node[index] for index in index]
 
-    f = open("a.txt", "w")
+    f = open(args.output, "w")
     for node_id, value in zip(ids, value):
         f.write(f"{node_id}\t{value}\n")
 
+
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input", dest="input", action="store")
+    parser.add_argument("--output", dest="output", action="store")
+    parser.add_argument("--niter", dest="niter", default=64, action="store")
+    args = parser.parse_args()
+
+    main(args)
