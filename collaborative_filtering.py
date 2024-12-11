@@ -187,7 +187,7 @@ if __name__ == "__main__":
     for pred in predictions:
         print(pred)
 
-    with open("submissions.csv", mode='w', newline='', encoding='utf-8') as csvFile:
+    with open("submission.csv", mode='w', newline='', encoding='utf-8') as csvFile:
         writer = csv.writer(csvFile)
         writer.writerow(["RID", "rating"])
 

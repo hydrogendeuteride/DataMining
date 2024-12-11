@@ -206,7 +206,7 @@ def test(model, user_to_index, item_to_index, test_file, batch_size=64):
 
 
 def save_output(preds):
-    with open("submissions.csv", mode='w', newline='', encoding='utf-8') as csvFile:
+    with open("submission.csv", mode='w', newline='', encoding='utf-8') as csvFile:
         writer = csv.writer(csvFile)
         writer.writerow(["RID", "rating"])
 

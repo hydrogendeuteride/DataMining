@@ -97,7 +97,7 @@ def main(args):
             combined_score = (tfidf_score + lfm_score) / 2.0
             combined_predictions.append((rid, combined_score))
 
-    with open("submissions.csv", mode="w", newline="", encoding="utf-8") as csvFile:
+    with open("submission.csv", mode="w", newline="", encoding="utf-8") as csvFile:
         writer = csv.writer(csvFile)
         writer.writerow(["RID", "rating"])
         writer.writerows(combined_predictions)

@@ -230,7 +230,7 @@ def main(args):
     test_file = args.test
     predictions = predict(test_file, user_profiles, tf_idf_matrix, user_avg_ratings, item_avg_ratings, global_avg_rating)
 
-    with open("submissions.csv", mode="w", newline="", encoding="utf-8") as csvFile:
+    with open("submission.csv", mode="w", newline="", encoding="utf-8") as csvFile:
         writer = csv.writer(csvFile)
         writer.writerow(["RID", "rating"])
         writer.writerows(predictions)
