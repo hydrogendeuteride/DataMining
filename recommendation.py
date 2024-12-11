@@ -1,7 +1,5 @@
+import argparse
 from collections import defaultdict
-
-import torch
-import numpy as np
 import csv
 import math
 
@@ -65,7 +63,7 @@ def group_by_user(dataset):
     return user_data
 
 
-def create_user_profile(user_data, tf_idf_matrix):
+def create_user_profile(user_data, tf_idf_matrix, user_avg_ratings):
     user_profiles = {}
     for user_id, items in user_data.items():
         user_profile = {genre: 0 for genre in tf_idf_matrix[0][1].keys()}
@@ -95,8 +93,8 @@ def create_user_profile(user_data, tf_idf_matrix):
 
 def cosine_similarity(vec1, vec2):
     dot_product = sum(vec1[genre] * vec2[genre] for genre in vec1)
-    norm_vec1 = math.sqrt(sum(vec1[genre]**2 for genre in vec1))
-    norm_vec2 = math.sqrt(sum(vec2[genre]**2 for genre in vec2))
+    norm_vec1 = math.sqrt(sum(vec1[genre] ** 2 for genre in vec1))
+    norm_vec2 = math.sqrt(sum(vec2[genre] ** 2 for genre in vec2))
     return dot_product / (norm_vec1 * norm_vec2 + 1e-10)
 
 
@@ -127,11 +125,12 @@ def calculate_user_avg_ratings(dataset):
     return user_avg_rating
 
 
-def predict_rating(user_id, item_id, user_profiles, tf_idf_matrix, user_avg_ratings, item_avg_ratings, global_avg_rating):
+def predict_rating(user_id, item_id, user_profiles, tf_idf_matrix, user_avg_ratings, item_avg_ratings,
+                   global_avg_rating):
     b_u = user_avg_ratings.get(user_id, global_avg_rating) - global_avg_rating
     b_i = item_avg_ratings.get(item_id, global_avg_rating) - global_avg_rating
 
-    user_profile = user_profiles[user_id]
+    user_profile = user_profiles.get(user_id, None)
     if user_profile is None:
         return global_avg_rating + b_u + b_i
 
@@ -152,21 +151,105 @@ def predict_rating(user_id, item_id, user_profiles, tf_idf_matrix, user_avg_rati
     return predicted_rating
 
 
-d = get_train_dataset("train.csv")
-g = preprocess_genre(d)
-tf_idf_matrix = tf_idf_rated(d, g)
+def train(file):
+    dataset = get_train_dataset(file)
 
-user_data = group_by_user(d)
-user_avg_ratings = calculate_user_avg_ratings(d)
-item_avg_ratings = calculate_item_avg_ratings(d)
-global_avg_rating = calculate_global_avg_rating(d)
-u = create_user_profile(user_data, tf_idf_matrix)
+    genres_set = preprocess_genre(dataset)
+    tf_idf_matrix = tf_idf_rated(dataset, genres_set)
 
-user_id = "1"
-item_id1 = "151"
-item_id2 = "2115"
-predicted_rating1 = predict_rating(user_id, item_id1, u, tf_idf_matrix, user_avg_ratings, item_avg_ratings, global_avg_rating)
-predicted_rating2 = predict_rating(user_id, item_id2, u, tf_idf_matrix, user_avg_ratings, item_avg_ratings, global_avg_rating)
+    user_data = group_by_user(dataset)
+    user_avg_ratings = calculate_user_avg_ratings(dataset)
+    item_avg_ratings = calculate_item_avg_ratings(dataset)
+    global_avg_rating = calculate_global_avg_rating(dataset)
 
-print(f"Predicted Rating for User {user_id} and Item {item_id1}: {predicted_rating1}")
-print(f"Predicted Rating for User {user_id} and Item {item_id2}: {predicted_rating2}")
+    user_profiles = create_user_profile(user_data, tf_idf_matrix, user_avg_ratings)
+
+    return user_profiles, tf_idf_matrix, user_avg_ratings, item_avg_ratings, global_avg_rating
+
+
+def calculate_rmse(predictions_file, ground_truth_file):
+    with open(predictions_file, mode="r", encoding="utf-8") as pred_file:
+        reader = csv.reader(pred_file)
+        next(reader)
+        predictions = {int(row[0]): float(row[1]) for row in reader}
+
+    with open(ground_truth_file, mode="r", encoding="utf-8") as truth_file:
+        reader = csv.reader(truth_file)
+        next(reader)
+        ground_truth = {int(row[0]): float(row[1]) for row in reader}
+
+    squared_errors = []
+    absolute_errors = []
+
+    for rid, true_rating in ground_truth.items():
+        predicted_rating = predictions.get(rid, None)
+        if predicted_rating is not None:
+            squared_errors.append((predicted_rating - true_rating) ** 2)
+            absolute_errors.append(abs(predicted_rating - true_rating))
+
+    rmse = math.sqrt(sum(squared_errors) / len(squared_errors))
+
+    return rmse
+
+
+def predict(test_file, user_profiles, tf_idf_matrix, user_avg_ratings, item_avg_ratings, global_avg_rating,
+            batch_size=64):
+    def process_test_data(file):
+        with open(file, newline='', encoding='utf-8') as csvFile:
+            reader = csv.reader(csvFile)
+            data = []
+            next(reader)
+            for row in reader:
+                rid = int(row[0])
+                user_id = row[1]
+                item_id = row[2]
+                data.append((rid, user_id, item_id))
+        return data
+
+    def create_test_batches(data, batch_size):
+        for i in range(0, len(data), batch_size):
+            yield data[i:i + batch_size]
+
+    test_data = process_test_data(test_file)
+    all_predictions = []
+
+    for batch in create_test_batches(test_data, batch_size):
+        for rid, user_id, item_id in batch:
+            pred_rating = predict_rating(
+                user_id, item_id, user_profiles, tf_idf_matrix, user_avg_ratings, item_avg_ratings, global_avg_rating
+            )
+            all_predictions.append((rid, pred_rating))
+
+    return all_predictions
+
+
+def main(args):
+    train_file = args.train
+    user_profiles, tf_idf_matrix, user_avg_ratings, item_avg_ratings, global_avg_rating = train(train_file)
+
+    test_file = args.test
+    predictions = predict(test_file, user_profiles, tf_idf_matrix, user_avg_ratings, item_avg_ratings, global_avg_rating)
+
+    with open("submissions.csv", mode="w", newline="", encoding="utf-8") as csvFile:
+        writer = csv.writer(csvFile)
+        writer.writerow(["RID", "rating"])
+        writer.writerows(predictions)
+
+    # predictions_file = "predictions.csv"
+
+    # ground_truth_file = "submissions1.csv"
+    # rmse = calculate_rmse(predictions_file, ground_truth_file)
+    #
+    # print(f"RMSE: {rmse:.4f}")
+
+    for rid, pred in predictions:
+        print(f"RID: {rid}, Predicted Rating: {pred:.2f}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--train", dest="train", action="store")
+    parser.add_argument("--test", dest="test", action="store")
+    args = parser.parse_args()
+
+    main(args)

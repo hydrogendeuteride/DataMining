@@ -4,6 +4,7 @@ import numpy as np
 import csv
 from collections import defaultdict
 import argparse
+from sklearn.model_selection import train_test_split
 
 
 def get_train_dataset(file):
@@ -25,7 +26,9 @@ def preprocess_data(data):
     item_ids = list(set(row[1] for row in data))
 
     user_to_index = {user_id: i for i, user_id in enumerate(user_ids)}
+    user_to_index["UNK"] = len(user_ids)
     item_to_index = {item_id: i for i, item_id in enumerate(item_ids)}
+    item_to_index["UNK"] = len(item_ids)
 
     processed_data = [
         [user_to_index[row[0]], item_to_index[row[1]], row[2]] for row in data
@@ -53,15 +56,14 @@ def calculate_biases(data):
 class LFM(nn.Module):
     def __init__(self, n_users, n_items, n_rank):
         super(LFM, self).__init__()
-        self.P = nn.Parameter(nn.init.xavier_normal_(torch.empty(n_users, n_rank)))
-        self.Q = nn.Parameter(nn.init.xavier_normal_(torch.empty(n_items, n_rank)))
+        self.P = nn.Parameter(nn.init.kaiming_normal_(torch.empty(n_users + 1, n_rank, dtype=torch.float32)))
+        self.Q = nn.Parameter(nn.init.kaiming_normal_(torch.empty(n_items + 1, n_rank, dtype=torch.float32)))
 
-        self.mu = nn.Parameter(torch.zeros(1))
-        self.user_bias = nn.Parameter(torch.zeros(n_users))
-        self.item_bias = nn.Parameter(torch.zeros(n_items))
+        self.mu = nn.Parameter(torch.zeros(1, dtype=torch.float32), requires_grad=False)
+        self.user_bias = nn.Parameter(torch.zeros(n_users + 1, dtype=torch.float32))
+        self.item_bias = nn.Parameter(torch.zeros(n_items + 1, dtype=torch.float32))
 
-        self.hidden = nn.Linear(n_rank, 1)
-        self.act = nn.LeakyReLU(negative_slope=0.3)
+        self.act = nn.SELU()
 
     def forward(self, user_ids, item_ids):
         global_bias = self.mu
@@ -71,18 +73,15 @@ class LFM(nn.Module):
         user_factors = self.P[user_ids]
         item_factors = self.Q[item_ids]
 
-        interaction = user_factors * item_factors
-        interaction = self.act(interaction)
-        interaction = self.hidden(interaction).squeeze()
+        interaction = torch.sum(self.act(user_factors * item_factors), dim=1)
 
-        pred_rating_raw = global_bias + user_bias + item_bias + interaction
-        pred_rating = torch.clamp(pred_rating_raw, min=1.0, max=5.0)
+        pred_rating = global_bias + user_bias + item_bias + interaction
 
         return pred_rating
 
 
 def create_batches(data, batch_size):
-    data = torch.tensor(data, dtype=torch.float)
+    data = torch.tensor(data, dtype=torch.float32)
     shuffled_data = data[torch.randperm(len(data))]
 
     batches = []
@@ -96,50 +95,66 @@ def create_batches(data, batch_size):
     return batches
 
 
-def train_model(train_file):
-    pdata = get_train_dataset(train_file)
-    processed_data, user_to_index, item_to_index = preprocess_data(pdata)
-    num_users = len(user_to_index)
-    num_items = len(item_to_index)
-    batch_size = 256
-    n_rank = 64
+def train_model(pdata):
+    train_data, val_data = train_test_split(pdata, test_size=0.1, random_state=42)
 
-    global_mean, user_means, item_means = calculate_biases(processed_data)
+    train_processed, user_to_index, item_to_index = preprocess_data(train_data)
+    val_processed, _, _ = preprocess_data(val_data)
+
+    num_users = len(user_to_index) - 1
+    num_items = len(item_to_index) - 1
+    batch_size = 256
+    n_rank = 50
+
+    global_mean, user_means, item_means = calculate_biases(train_processed)
 
     model = LFM(num_users, num_items, n_rank)
 
     model.mu.data.fill_(global_mean)
     for user, bias in user_means.items():
-        if user + 1 in user_to_index:
-            index = user_to_index[user + 1]
-            model.user_bias.data[index] = bias
-
+        model.user_bias.data[user] = bias
     for item, bias in item_means.items():
-        if item + 1 in item_to_index:
-            index = item_to_index[item + 1]
-            model.item_bias.data[index] = bias
+        model.item_bias.data[item] = bias
+
+    model.user_bias.data[-1] = 0
+    model.item_bias.data[-1] = 0
 
     criterion = nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.0005, weight_decay=0.00001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
+
     epochs = 256
 
     for epoch in range(epochs):
-        batches = create_batches(processed_data, batch_size)
-        epoch_loss = 0.0
-        for user_ids, item_ids, ratings in batches:
+        model.train()
+        train_batches = create_batches(train_processed, batch_size)
+        epoch_train_loss = 0.0
+
+        for user_ids, item_ids, ratings in train_batches:
             optimizer.zero_grad()
             pred_ratings = model(user_ids, item_ids)
-            pred_ratings = torch.clamp(pred_ratings, min=1.0, max=5.0)
+            train_loss = criterion(pred_ratings, ratings)
+            train_loss.backward()
 
-            pred_loss = criterion(pred_ratings, ratings)
-            loss = pred_loss
-            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
+
             optimizer.step()
+            epoch_train_loss += train_loss.item() * len(user_ids)
 
-            epoch_loss += loss.item() * batch_size
+        avg_train_loss = np.sqrt(epoch_train_loss / len(train_data))
 
-        avg_loss = np.sqrt(epoch_loss / len(pdata))
-        print(f"Epoch {epoch + 1}/{epochs}, Loss: {avg_loss:.4f}")
+        model.eval()
+        val_batches = create_batches(val_processed, batch_size)
+        epoch_val_loss = 0.0
+
+        with torch.no_grad():
+            for user_ids, item_ids, ratings in val_batches:
+                pred_ratings = torch.clamp(model(user_ids, item_ids), 1.0, 5.0)
+                val_loss = criterion(pred_ratings, ratings)
+                epoch_val_loss += val_loss.item() * len(user_ids)
+
+        avg_val_loss = np.sqrt(epoch_val_loss / len(val_data))
+
+        print(f"Epoch {epoch + 1}/{epochs}, Train Loss: {avg_train_loss:.4f}, Val Loss: {avg_val_loss:.4f}")
 
     print("Training complete")
     return model, user_to_index, item_to_index
@@ -172,15 +187,15 @@ def test(model, user_to_index, item_to_index, test_file, batch_size=64):
 
     for batch in create_test_batches(tdata, batch_size):
         rids = [row[0] for row in batch]
-        user_ids = [user_to_index.get(row[1], -1) for row in batch]
-        item_ids = [item_to_index.get(row[2], -1) for row in batch]
+        user_ids = [user_to_index.get(row[1], user_to_index["UNK"]) for row in batch]
+        item_ids = [item_to_index.get(row[2], user_to_index["UNK"]) for row in batch]
 
         rids = torch.tensor(rids)
         user_ids = torch.tensor(user_ids)
         item_ids = torch.tensor(item_ids)
 
         with torch.no_grad():
-            predictions = model(user_ids, item_ids)
+            predictions = torch.clamp(model(user_ids, item_ids), 1.0, 5.0)
 
         all_predictions.extend(zip(rids.cpu().numpy(), predictions.cpu().numpy()))
 
@@ -188,31 +203,6 @@ def test(model, user_to_index, item_to_index, test_file, batch_size=64):
         print(f"RID: {rid}, Predicted Rating: {pred:.2f}")
 
     return all_predictions
-
-
-def test_eval(preds, valid_file):
-    actual_ratings = {}
-    with open(valid_file, newline='', encoding='utf-8') as csvFile:
-        reader = csv.reader(csvFile)
-        next(reader)  # 헤더 스킵
-        for row in reader:
-            rid = int(row[0])
-            rating = float(row[1])
-            actual_ratings[rid] = rating
-
-    errors = []
-    for rid, pred_rating in preds:
-        if rid in actual_ratings:
-            actual_rating = actual_ratings[rid]
-            errors.append((pred_rating - actual_rating) ** 2)
-
-    if errors:
-        rmse = np.sqrt(np.mean(errors))
-        print(f"RMSE: {rmse:.4f}")
-        return rmse
-    else:
-        print("No matching RIDs found between predictions and actual ratings.")
-        return None
 
 
 def save_output(preds):
@@ -225,11 +215,10 @@ def save_output(preds):
 
 
 def main(args):
-    model, user_to_index, item_to_index = train_model(args.train)
+    pdata = get_train_dataset(args.train)
+    model, user_to_index, item_to_index = train_model(pdata)
 
     preds = test(model, user_to_index, item_to_index, args.test)
-
-    # test_eval(preds, "submission.csv")
 
     save_output(preds)
 
